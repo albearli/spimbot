@@ -63,10 +63,11 @@ get_next_puzzle:
         j       wait_for_puzzle
 
 wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
-        lw      $t0, ready($0)
-	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
 	li	$t1, 1
 	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+
+        lw      $t0, ready($0)
+	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
         j       solve_current_puzzle	
 
 solve_current_puzzle:
