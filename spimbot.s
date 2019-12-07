@@ -52,7 +52,9 @@ main:
     #Fill in your code here
         la      $a0, puzzle 
         la      $a1, heap
-        j       check_puzzle
+
+        j       get_next_puzzle
+
 solve_current_puzzle:
         la      $a0, puzzle     # create a new copy and put it on heap
         la      $a1, heap
@@ -66,34 +68,31 @@ solve_current_puzzle:
         sw      $t0, SUBMIT_SOLUTION($0)
         sw      $0, ready($0)   # reset ready
         lw      $t0, GET_PAINT_BUCKETS($0)
-        j       check_puzzle
+        j       prepare_paint
 
 get_next_puzzle:
         la      $t0, puzzle
         sw      $t0, REQUEST_PUZZLE($0)	
-        j       buffer
-
-check_puzzle: 
-        # la      $t0, puzzle
-        # sw      $t0, REQUEST_PUZZLE($0)	
-        beq     $t1, 0, get_next_puzzle
+        j       wait_for_puzzle
 
 prepare_paint:  # set the velocity, enable paint brush, set 
-        li      $t5, 10     # max velocity
-        sw      $t5, VELOCITY($0)
-        li      $t3, 1
-        sw      $t3, ENABLE_PAINT_BRUSH($0)
-        li      $t2, 1
-        sw      $t2, ANGLE_CONTROL($0)
+        li      $t1, 10     # max velocity
+	sw      $t1, VELOCITY($0)		# velocity = 10
+        li      $t1, 1
+        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+        li      $t1, 1
+        sw      $t1, ANGLE_CONTROL($0)		# set angle to relative
         move    $t1, $0
-        sw      $t1, ANGLE($0) 
+        sw      $t1, ANGLE($0)			# set angle to relative 0
         j       real_return
-buffer:         # infinite loop to make sure the next puzzle exists
+
+wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
         lw      $t0, ready($0)
-        beq     $t0, $0, buffer 
-        j       solve_current_puzzle
+	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
+        j       solve_current_puzzle	
+
 real_return: 
-        j       check_puzzle
+        j       get_next_puzzle
         jr      $ra
 
 
@@ -800,7 +799,7 @@ interrupt_dispatch:            # Interrupt:
 bonk_interrupt:
     sw      $0, BONK_ACK
     #Fill in your code here
-        li      $t0, 80
+        li      $t0, 80			# angle to go after bouncing
         sw      $t0, ANGLE($0)
         sw      $0, ANGLE_CONTROL($0)
         li      $t0, 10
@@ -811,7 +810,7 @@ request_puzzle_interrupt:
     sw      $0, REQUEST_PUZZLE_ACK
     #Fill in your code here
         la      $t0, ready
-        add     $t1, $0, 1
+        li      $t1, 1
         sw      $t1, 0($t0)
     j   interrupt_dispatch
 
