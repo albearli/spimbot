@@ -32,6 +32,8 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8  ## Puzzle
 GET_PAINT_BUCKETS       = 0xffff00e4
 SWITCH_MODE             = 0xffff00f0
 
+PICKUP_POWERUP		= 0xffff00f4
+
 ### Puzzle
 GRIDSIZE = 8
 ENABLE_PAINT_BRUSH      = 0xffff00f0
@@ -55,6 +57,18 @@ main:
 
         j       get_next_puzzle
 
+get_next_puzzle:
+        la      $t0, puzzle
+        sw      $t0, REQUEST_PUZZLE($0)	
+        j       wait_for_puzzle
+
+wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
+        lw      $t0, ready($0)
+	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
+	li	$t1, 1
+	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+        j       solve_current_puzzle	
+
 solve_current_puzzle:
         la      $a0, puzzle     # create a new copy and put it on heap
         la      $a1, heap
@@ -70,31 +84,21 @@ solve_current_puzzle:
         lw      $t0, GET_PAINT_BUCKETS($0)
         j       prepare_paint
 
-get_next_puzzle:
-        la      $t0, puzzle
-        sw      $t0, REQUEST_PUZZLE($0)	
-        j       wait_for_puzzle
-
 prepare_paint:  # set the velocity, enable paint brush, set 
         li      $t1, 10     # max velocity
 	sw      $t1, VELOCITY($0)		# velocity = 10
         li      $t1, 1
         sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
-        li      $t1, 1
-        sw      $t1, ANGLE_CONTROL($0)		# set angle to relative
-        move    $t1, $0
-        sw      $t1, ANGLE($0)			# set angle to relative 0
-        j       real_return
-
-wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
-        lw      $t0, ready($0)
-	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
-        j       solve_current_puzzle	
+        sw      $t1, ANGLE_CONTROL($0)		# set angle to absolute
+        li	$t1, 0
+        sw      $t1, ANGLE($0)			# set angle to absolute 0 (+x axis)
+	li	$t1, 1
+	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+        j       get_next_puzzle
 
 real_return: 
         j       get_next_puzzle
         jr      $ra
-
 
 
 # Given Puzzle Code
