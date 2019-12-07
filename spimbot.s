@@ -804,8 +804,8 @@ interrupt_dispatch:            # Interrupt:
 bonk_interrupt:
     sw      $0, BONK_ACK
     #Fill in your code here
-        sub     $sp, $sp, 4
-        sw      $t0, 0($sp)
+        # sub     $sp, $sp, 4
+        # sw      $t0, 0($sp)
 
         li      $t0, 80	        # angle to go after bouncing
         sw      $t0, ANGLE($0)
@@ -813,8 +813,8 @@ bonk_interrupt:
         li      $t0, 10
         sw      $t0, VELOCITY($0)
 
-        lw      $t0, 0($sp)
-        add     $sp, $sp, 4
+        # lw      $t0, 0($sp)
+        # add     $sp, $sp, 4
     j       interrupt_dispatch    # see if other interrupts are waiting
 
 request_puzzle_interrupt:
