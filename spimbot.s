@@ -78,7 +78,7 @@ solve_current_puzzle:
         move    $a2, $0
         la      $a0, heap
         la      $a3, puzzle     # solve(heap, 0, 0, puzzle)
-        jal     solve 
+        jal     solve
         la      $t0, puzzle
         sw      $t0, SUBMIT_SOLUTION($0)
         sw      $0, ready($0)   # reset ready
@@ -88,8 +88,8 @@ solve_current_puzzle:
 prepare_paint:  # set the velocity, enable paint brush, set 
         li      $t1, 10     # max velocity
 	sw      $t1, VELOCITY($0)		# velocity = 10
-        li      $t1, 1
-        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+        # li      $t1, 1
+        # sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
         sw      $t1, ANGLE_CONTROL($0)		# set angle to absolute
         li	$t1, 0
         sw      $t1, ANGLE($0)			# set angle to absolute 0 (+x axis)
@@ -804,11 +804,17 @@ interrupt_dispatch:            # Interrupt:
 bonk_interrupt:
     sw      $0, BONK_ACK
     #Fill in your code here
-        li      $t0, 80			# angle to go after bouncing
+        sub     $sp, $sp, 4
+        sw      $t0, 0($sp)
+
+        li      $t0, 80	        # angle to go after bouncing
         sw      $t0, ANGLE($0)
         sw      $0, ANGLE_CONTROL($0)
         li      $t0, 10
         sw      $t0, VELOCITY($0)
+
+        lw      $t0, 0($sp)
+        add     $sp, $sp, 4
     j       interrupt_dispatch    # see if other interrupts are waiting
 
 request_puzzle_interrupt:
