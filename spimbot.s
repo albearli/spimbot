@@ -48,6 +48,7 @@ main:
     li      $t4, 0
     or      $t4, $t4, BONK_INT_MASK # request bonk
     or      $t4, $t4, REQUEST_PUZZLE_INT_MASK           # puzzle interrupt bit
+    or	    $t4, $t4, TIMER_INT_MASK
     or      $t4, $t4, 1 # global enable
     mtc0    $t4, $12
 
@@ -55,6 +56,14 @@ main:
         la      $a0, puzzle 
         la      $a1, heap
 
+        li      $t1, 10     # max velocity
+	sw      $t1, VELOCITY($0)		# velocity = 10
+        li      $t1, 1
+        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+
+	lw	$t1, TIMER($0)		# Request timer interrupt in 1000 cycles
+	add	$t1, $t1, 10000
+	sw	$t1, TIMER($0)
         j       get_next_puzzle
 
 get_next_puzzle:
@@ -86,15 +95,6 @@ solve_current_puzzle:
         j       prepare_paint
 
 prepare_paint:  # set the velocity, enable paint brush, set 
-        li      $t1, 10     # max velocity
-	sw      $t1, VELOCITY($0)		# velocity = 10
-        # li      $t1, 1
-        # sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
-        sw      $t1, ANGLE_CONTROL($0)		# set angle to absolute
-        li	$t1, 0
-        sw      $t1, ANGLE($0)			# set angle to absolute 0 (+x axis)
-	li	$t1, 1
-	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
         j       get_next_puzzle
 
 real_return: 
@@ -807,7 +807,7 @@ bonk_interrupt:
         # sub     $sp, $sp, 4
         # sw      $t0, 0($sp)
 
-        li      $t0, 80	        # angle to go after bouncing
+        li      $t0, 37        # angle to go after bouncing
         sw      $t0, ANGLE($0)
         sw      $0, ANGLE_CONTROL($0)
         li      $t0, 10
@@ -828,6 +828,15 @@ request_puzzle_interrupt:
 timer_interrupt:
     sw      $0, TIMER_ACK
     #Fill in your code here
+	lw	$t1, TIMER($0)		# Request timer interrupt in 1000 cycles
+	add	$t1, $t1, 10000
+	sw	$t1, TIMER($0)
+
+	li	$t1, 1
+	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+        li      $t1, 1
+        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+
     j        interrupt_dispatch    # see if other interrupts are waiting
 
 non_intrpt:                # was some non-interrupt
