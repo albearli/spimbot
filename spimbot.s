@@ -32,13 +32,18 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8  ## Puzzle
 GET_PAINT_BUCKETS       = 0xffff00e4
 SWITCH_MODE             = 0xffff00f0
 
-PICKUP_POWERUP		= 0xffff00f4
+GET_INVENTORY			= 0xffff00e8
+
+PICKUP_POWERUP			= 0xffff00f4
+USE_POWERUP				= 0xffff00ec
 
 ### Puzzle
 GRIDSIZE = 8
 ENABLE_PAINT_BRUSH      = 0xffff00f0
 
 puzzle:      .half 0:164              
+powerup:	 .word 0:364
+inventory:   .word 0:24
 heap:        .half 0:50000 # change according to piazza
 ready:       .word 0
 
@@ -67,6 +72,8 @@ main:
         j       get_next_puzzle
 
 get_next_puzzle:
+    li      $t1, 1
+    sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
         la      $t0, puzzle
         sw      $t0, REQUEST_PUZZLE($0)	
         j       wait_for_puzzle
@@ -85,6 +92,7 @@ solve_current_puzzle:
         jal     copy_board      # copy_board(puzzle, heap)
         move    $a1, $0
         move    $a2, $0
+
         la      $a0, heap
         la      $a3, puzzle     # solve(heap, 0, 0, puzzle)
         jal     solve
@@ -835,8 +843,26 @@ timer_interrupt:
 	li	$t1, 1
 	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
         li      $t1, 1
-        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+   #     sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
 
+	la 		$t0, inventory
+	sw 		$t0, GET_INVENTORY($0)
+
+check_inventory1:	
+	lb 		$t1, 8($t0)							#Inventory[0] poweruptype
+	beq		$t1 $0 check_inventory2				#No item
+
+use_inventory1:
+	sw  	$0 USE_POWERUP($0)
+
+check_inventory2:
+	lb 		$t1, 20($t0)							#Inventory[1] poweruptype
+	beq		$t1, $0 timer_interrupt_finish
+
+	li 		$t2, 1
+	sw 		$t2 USE_POWERUP($0)
+
+timer_interrupt_finish:
     j        interrupt_dispatch    # see if other interrupts are waiting
 
 non_intrpt:                # was some non-interrupt
