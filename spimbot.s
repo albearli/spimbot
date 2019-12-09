@@ -69,14 +69,12 @@ main:
 	lw	$t1, TIMER($0)		# Request timer interrupt in 1000 cycles
 	add	$t1, $t1, 10000
 	sw	$t1, TIMER($0)
-        j       get_next_puzzle
 
 get_next_puzzle:
     li      $t1, 1
     sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
         la      $t0, puzzle
         sw      $t0, REQUEST_PUZZLE($0)	
-        j       wait_for_puzzle
 
 wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
 	li	$t1, 1
@@ -84,7 +82,6 @@ wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
 
         lw      $t0, ready($0)
 	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
-        j       solve_current_puzzle	
 
 solve_current_puzzle:
         la      $a0, puzzle     # create a new copy and put it on heap
@@ -100,10 +97,6 @@ solve_current_puzzle:
         sw      $t0, SUBMIT_SOLUTION($0)
         sw      $0, ready($0)   # reset ready
         lw      $t0, GET_PAINT_BUCKETS($0)
-        j       prepare_paint
-
-prepare_paint:  # set the velocity, enable paint brush, set 
-        j       get_next_puzzle
 
 real_return: 
         j       get_next_puzzle
@@ -307,92 +300,85 @@ solve_done_true:
 # // }
 #a0: board
 rule1:
-        sub     $sp, $sp, 32    # allocate stack
+        sub     $sp, $sp, 36
         sw      $ra, 0($sp)
-        sw      $a0, 4($sp)
-        sw      $s0, 8($sp)
-        sw      $s1, 12($sp)    # y
-        sw	$s2, 16($sp)    # x	 
-        sw	$s3, 20($sp)    # k
-        sw      $s4, 24($sp)	# changed
-        sw      $s5, 28($sp)    # value
-
-        move    $s0, $a0        # store address in s0
-        move    $s1, $0         # s1 = y = 0 
-        move    $s4, $0         # s4 = changed = false
-loop:
-        bge     $s1, GRIDSIZE, ret3
-        move    $s2, $0         # s2 = x = 0
-loop2:
-        bge     $s2, GRIDSIZE, inc1
-        mul     $t0, $s1, GRIDSIZE
-        add     $t0, $t0, $s2   # t0 = y*GRIDSIZE + x
-        mul     $t0, $t0, 2
-        add     $t0, $t0, $s0
-        lh      $s5, 0($t0)     # s5 = value
-        move    $a0, $s5        # a0 = value 
+        sw      $s0, 4($sp)
+        sw      $s1, 8($sp)
+        sw      $s2, 12($sp)
+        sw      $s3, 16($sp)
+        sw      $s4, 20($sp)
+        sw      $s5, 24($sp)
+        sw      $s6, 28($sp)
+        sw      $s7, 32($sp)
+        li      $s0, GRIDSIZE                  # $s0: GRIDSIZE = 4
+        move    $s1, $a0                # $s1: board
+        li      $s2, 0                  # $s2: changed = false
+        li      $s3, 0                  # $s3: y = 0
+r1_for_y_start:
+        bge     $s3, $s0, r1_for_y_end  # for: y < GRIDSIZE
+        li      $s4, 0                  # $s4: x = 0
+r1_for_x_start:
+        bge     $s4, $s0, r1_for_x_end  # for: x < GRIDSIZE
+        mul     $a0, $s3, $s0           # $a0: y*GRIDSIZE
+        add     $a0, $a0, $s4           # $a0: y*GRIDSIZE + x
+        sll     $a0, $a0, 1             # $a0: 2*(y*GRIDSIZE + x)
+        add     $a0, $a0, $s1           # $a0: &board[y*GRIDSIZE+x]
+        lhu     $a0, 0($a0)             # $a0: value = board[y*GRIDSIZE+x]
+        move    $s6, $a0                # $s6: value
         jal     has_single_bit_set
-        beq     $v0, $0, inc2
-
-        move    $s3, $0         # s3 = k = 0
-loop3:
-        bge     $s3, GRIDSIZE, inc2
-        beq     $s3, $s2, if_2
-
-        mul     $t0, $s1, GRIDSIZE
-        add     $t0, $t0, $s3   # t0 = y*GRIDSIZE + k
-        mul     $t0, $t0, 2
-        add     $t0, $t0, $s0
-        lh      $t1, 0($t0)     # t1 = board[y*GRIDSIZE + k]
-
-        and     $t2, $t1, $s5   # t2 = t1 & value
-        beq     $t2, $0, if_2
-
-        nor     $t2, $s5, $0    # t2 = ~value
-        and     $t3, $t1, $t2   # t1 = board[y*GRIDSIZE + k] &= ~value
-        sh      $t3, 0($t0)     # 
-        add     $t4, $0, 1
-        move    $s4, $t4        # changed = true
-if_2:
-        beq     $s3, $s1, inc3 
-        mul     $t0, $s3, GRIDSIZE
-        add     $t0, $t0, $s2   # k * GRIDSIZE + x
-        mul     $t0, $t0, 2
-        add     $t0, $t0, $s0
-
-        lh      $t1, 0($t0)
-
-        and     $t2, $t1, $s5   # t2 = t1 & value
-        beq     $t2, $0, inc3
-
-        nor     $t2, $s5, $0    # t3 = ~value
-        and     $t3, $t1, $t2   # t1 = board[y*GRIDSIZE + k] &= ~value
-        sh      $t3, 0($t0)     # 
-        add     $t4, $0, 1
-        move    $s4, $t4        # changed = true
-        j       inc3
-inc1:
-        add     $s1, $s1, 1     # s1 = ++y
-        j       loop
-inc2:
-        add     $s2, $s2, 1     # s2 = ++x
-        j       loop2
-inc3:
-        add     $s3, $s3, 1     # s3 = ++z
-        j       loop3
-
-ret3:
-        move    $v0, $s4        # return value = changed
+        beq     $v0, 0, r1_for_x_inc    # if(has_single_bit_set(value))
+        li      $s5, 0                  # $s5: k = 0
+r1_for_k_start:
+        bge     $s5, $s0, r1_for_k_end  # for: k < GRIDSIZE
+        beq     $s5, $s4, r1_if_kx_end  # if (k != x)
+        mul     $t0, $s3, $s0           # $t0: y*GRIDSIZE
+        add     $t0, $t0, $s5           # $t0: y*GRIDSIZE + k
+        sll     $t0, $t0, 1             # $t0: 2*(y*GRIDSIZE + k)
+        add     $t0, $t0, $s1           # $t0: &board[y*GRIDSIZE+k]
+        lhu     $t1, 0($t0)             # $t1: board[y*GRIDSIZE + k]
+        and     $t2, $t1, $s6           # $t2: board[y*GRIDSIZE + k] & value
+        beq     $t2, 0, r1_if_kx_end    # if (board[y*GRIDSIZE + k] & value)
+        not     $t3, $s6                # $t3: ~value
+        and     $t1, $t1, $t3           # $t1:  board[y*GRIDSIZE + k] & ~value
+        sh      $t1, 0($t0)             # board[y*GRIDSIZE + k] &= ~value
+        li      $s2, 1                  # changed = true
+r1_if_kx_end:   
+        beq     $s5, $s3, r1_if_ky_end  # if (k != y)
+        mul     $t0, $s5, $s0           # $t0: k*GRIDSIZE
+        add     $t0, $t0, $s4           # $t0: k*GRIDSIZE + x
+        sll     $t0, $t0, 1             # $t0: 2*(k*GRIDSIZE + x)
+        add     $t0, $t0, $s1           # $t0: &board[k*GRIDSIZE+x]
+        lhu     $t1, 0($t0)             # $t1: board[k*GRIDSIZE + x]
+        and     $t2, $t1, $s6           # $t2: board[k*GRIDSIZE + x] & value
+        beq     $t2, 0, r1_if_ky_end    # if (board[k*GRIDSIZE + x] & value)
+        not     $t3, $s6                # $t3: ~value
+        and     $t1, $t1, $t3           # $t1:  board[k*GRIDSIZE + x] & ~value
+        sh      $t1, 0($t0)             # board[k*GRIDSIZE + x] &= ~value
+        li      $s2, 1                  # changed = true
+r1_if_ky_end:
+        add     $s5, $s5, 1             # for: k++
+        j       r1_for_k_start
+r1_for_k_end:
+r1_for_x_inc:
+        add     $s4, $s4, 1             # for: x++
+        j       r1_for_x_start  
+r1_for_x_end:           
+r1_for_y_inc:  
+        add     $s3, $s3, 1             # for: y++
+        j       r1_for_y_start
+r1_for_y_end:
+        move    $v0, $s2                # return changed
+r1_return:
         lw      $ra, 0($sp)
-        lw      $a0, 4($sp)
-        lw      $s0, 8($sp)
-        lw      $s1, 12($sp)
-        lw	$s2, 16($sp)	 
-        lw	$s3, 20($sp)
-        lw      $s4, 24($sp)	 
-        lw      $s5, 28($sp)
-
-        add     $sp, $sp, 32
+        lw      $s0, 4($sp)
+        lw      $s1, 8($sp)
+        lw      $s2, 12($sp)
+        lw      $s3, 16($sp)
+        lw      $s4, 20($sp)
+        lw      $s5, 24($sp)
+        lw      $s6, 28($sp)
+        lw      $s7, 32($sp)
+        add     $sp, $sp, 36
         jr      $ra
 
 # rule2 #####################################################
