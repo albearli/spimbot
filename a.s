@@ -1,0 +1,905 @@
+# This is the only file that will be considered for grading
+
+.data
+# syscall constants
+PRINT_STRING            = 4
+PRINT_CHAR              = 11
+PRINT_INT               = 1
+
+# memory-mapped I/O
+VELOCITY                = 0xffff0010
+ANGLE                   = 0xffff0014
+ANGLE_CONTROL           = 0xffff0018
+
+BOT_X                   = 0xffff0020
+BOT_Y                   = 0xffff0024
+
+TIMER                   = 0xffff001c
+ARENA_MAP               = 0xffff00dc
+
+REQUEST_PUZZLE          = 0xffff00d0  ## Puzzle
+SUBMIT_SOLUTION         = 0xffff00d4  ## Puzzle
+
+BONK_INT_MASK           = 0x1000
+BONK_ACK                = 0xffff0060
+
+TIMER_INT_MASK          = 0x8000
+TIMER_ACK               = 0xffff006c
+
+REQUEST_PUZZLE_INT_MASK = 0x800       ## Puzzle
+REQUEST_PUZZLE_ACK      = 0xffff00d8  ## Puzzle
+
+GET_PAINT_BUCKETS       = 0xffff00e4
+SWITCH_MODE             = 0xffff00f0
+
+GET_INVENTORY			= 0xffff00e8
+
+PICKUP_POWERUP			= 0xffff00f4
+USE_POWERUP				= 0xffff00ec
+
+### Puzzle
+GRIDSIZE = 8
+ENABLE_PAINT_BRUSH      = 0xffff00f0
+
+puzzle:      .half 0:164              
+powerup:	 .word 0:364
+inventory:   .word 0:24
+heap:        .half 0:50000 # change according to piazza
+ready:       .word 0
+
+.text
+main:
+    # Construct interrupt mask
+    li      $t4, 0
+    or      $t4, $t4, BONK_INT_MASK # request bonk
+    or      $t4, $t4, REQUEST_PUZZLE_INT_MASK           # puzzle interrupt bit
+    or	    $t4, $t4, TIMER_INT_MASK
+    or      $t4, $t4, 1 # global enable
+    mtc0    $t4, $12
+
+    #Fill in your code here
+        la      $a0, puzzle 
+        la      $a1, heap
+
+        li      $t1, 10     # max velocity
+	sw      $t1, VELOCITY($0)		# velocity = 10
+        li      $t1, 1
+        sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+
+	lw	$t1, TIMER($0)		# Request timer interrupt in 1000 cycles
+	add	$t1, $t1, 10000
+	sw	$t1, TIMER($0)
+        j       get_next_puzzle
+
+get_next_puzzle:
+    li      $t1, 1
+    sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+        la      $t0, puzzle
+        sw      $t0, REQUEST_PUZZLE($0)	
+        j       wait_for_puzzle
+
+wait_for_puzzle:         # infinite loop to make sure the next puzzle exists
+	li	$t1, 1
+	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+
+        lw      $t0, ready($0)
+	beq     $t0, $0, wait_for_puzzle		# while (ready == 0)
+        j       solve_current_puzzle	
+
+solve_current_puzzle:
+        la      $a0, puzzle     # create a new copy and put it on heap
+        la      $a1, heap
+        jal     copy_board      # copy_board(puzzle, heap)
+        move    $a1, $0
+        move    $a2, $0
+
+        la      $a0, heap
+        la      $a3, puzzle     # solve(heap, 0, 0, puzzle)
+        jal     solve
+        la      $t0, puzzle
+        sw      $t0, SUBMIT_SOLUTION($0)
+        sw      $0, ready($0)   # reset ready
+        lw      $t0, GET_PAINT_BUCKETS($0)
+        j       prepare_paint
+
+prepare_paint:  # set the velocity, enable paint brush, set 
+        j       get_next_puzzle
+
+real_return: 
+        j       get_next_puzzle
+        jr      $ra
+
+
+# Given Puzzle Code
+# bool solve(unsigned short *current_board, unsigned row, unsigned col, Puzzle* puzzle) {
+#     if (row >= GRIDSIZE || col >= GRIDSIZE) {
+#         bool done = board_done(current_board, puzzle);
+#         if (done) {
+#             copy_board(current_board,puzzle->board);
+#         }
+#
+#         return done;
+#     }
+#     current_board = increment_heap(current_board, puzzle);
+#
+#     bool changed;
+#     do {
+#         changed = rule1(current_board);
+#         changed |= rule2(current_board);
+#         //changed |= rule3(board); //rule3 not done
+#     } while (changed);
+
+#     //added:
+#     bool done = board_done(current_board, puzzle);
+#     if (done) {
+#         copy_board(current_board,puzzle->board);
+#     }
+#
+#
+#     short possibles = current_board[row*GRIDSIZE + col];
+#     for(char number = 0; number < GRIDSIZE; ++number) {
+#         if ((1 << number) & possibles) {
+#             current_board[row*GRIDSIZE + col] = 1 << number;
+#             unsigned next_row = ((col == GRIDSIZE-1) ? row + 1 : row);
+#             if (solve(current_board, next_row, (col + 1) % GRIDSIZE, puzzle)) {
+#                 return true;
+#             }
+#             current_board[row*GRIDSIZE + col] = possibles;
+#         }
+#     }
+#     return false;
+# }
+solve:
+        sub     $sp, $sp, 52    # allocate stack
+        sw      $ra, 0($sp)
+        sw      $a0, 4($sp)
+        sw      $a1, 8($sp)
+        sw      $a2, 12($sp)
+        sw      $a3, 16($sp)
+        sw      $s0, 20($sp)    # store a0 
+        sw      $s1, 24($sp)    # store a1
+        sw      $s2, 28($sp)    # store a2 
+        sw      $s3, 32($sp)    # store a3
+        sw      $s4, 36($sp)    # changed
+        sw      $s5, 40($sp)    # possibles
+        sw      $s6, 44($sp)    # number
+        sw      $s7, 48($sp)    # done
+
+        move    $s0, $a0
+        move    $s1, $a1        # replace store addresses
+        move    $s2, $a2
+        move    $s3, $a3
+        
+        bge     $s1, GRIDSIZE, inside     
+        bge     $s2, GRIDSIZE, inside
+        j       not_if
+inside:
+        move    $a0, $s0
+        move    $a1, $s3        # a1 = puzzle 
+        jal     board_done
+        move    $s7, $v0        # s7 = done = board_done(a0, a1)
+        beq     $s7, $0, ret2   # go to r3eturn if not done 
+
+        move    $a0, $s0
+        move    $a1, $s3
+        jal     copy_board
+        move    $v0, $s7        # set v0 to done
+        j       ret2
+not_if:
+        move    $a0, $s0
+        move    $a1, $s3     # puzzle
+        jal     increment_heap 
+        move    $s0, $v0        # current_board = increment_heap(a0, a1)
+        add     $s4, $0, $0     # s4 = changed
+do_loop:
+        move    $a0, $s0
+        jal     rule1
+        move    $s4, $v0        # s4 = changed = rule1(a0)
+        move    $a0, $s0
+        jal     rule2 
+        or      $s4, $s4, $v0   # changed |= rule2(a0)
+        beq     $s4, $0, after_do1
+        j       do_loop        
+after_do1:
+        move    $a0, $s0        # a0 = current_board
+        move    $a1, $s3        # a1 = puzzle
+        jal     board_done
+
+        beq     $v0, $0, after_do2  # if done is false, go on
+
+        move    $a0, $s0
+        move    $a1, $s3
+        jal     copy_board
+
+after_do2:
+        mul     $t0, $s1, GRIDSIZE
+        add     $t0, $t0, $s2   # t0 = row*GRIDSIZE + col
+        mul     $t0, $t0, 2     # short indices
+        add     $t0, $t0, $s0   # t0 = current_board[t0]
+        lh      $s5, 0($t0)     # s5 = possibles
+        add     $s6, $0, $0     # s6 = number = 0
+for_loop:
+        bge     $s6, GRIDSIZE, end
+
+        add     $t1, $0, 1      # t1 = 1
+        sll     $t1, $t1, $s6   # t1 = 1 << number
+        and     $t2, $t1, $s5   # t2 = (1 << number) & possibles
+        beq     $t2, $0, inc4   # if t2 == false, go to inc4
+
+        mul     $t2, $s1, GRIDSIZE
+        add     $t2, $t2, $s2   # t2 = row * GRIDSIZE + col
+        mul     $t2, $t2, 2
+        add     $s7, $t2, $s0   # s7 = &current_board[row*GRIDSIZE + col]
+        sh      $t1, 0($s7)     # s7 = 1 << number
+
+        add     $t3, $0, 1      # t3 = 1
+        sub     $t3, $t3, GRIDSIZE
+        mul     $t3, $t3, -1    # t3 = GRIDSIZE - 1
+        move    $a1, $s1
+        bne     $s2, $t3, if_solve      # next_row = row
+
+        add     $a1, $s1, 1     # next_row = row + 1
+
+if_solve:
+        move    $a0, $s0
+        add     $t4, $s2, 1     # t4 = col + 1
+        rem     $t4, $t4, GRIDSIZE
+        move    $a2, $t4        # a2 = (col + 1) % GRIDSIZE
+        move    $a3, $s3
+
+        jal     solve
+        bne     $v0, $0, ret2   # if true, return true
+        
+        mul     $t0, $s1, GRIDSIZE
+        add     $t0, $t0, $s2   # t0 = row*GRIDSIZE + col
+        mul     $t0, $t0, 2
+        add     $t0, $t0, $s0   # t0 = current_board[t0]
+        sh      $s5, 0($t0)     # current_board[row*GRIDSIZE + col] = possibles;
+
+inc4:
+        add     $s6, $s6, 1
+        j       for_loop
+end:
+        add     $v0, $0, $0
+ret2:
+        lw      $ra, 0($sp)
+        lw      $a0, 4($sp)
+        lw      $a1, 8($sp)
+        lw      $a2, 12($sp)
+        lw      $a3, 16($sp)
+        lw      $s0, 20($sp)    # store a0 
+        lw      $s1, 24($sp)    # store a1
+        lw      $s2, 28($sp)    # store a2 
+        lw      $s3, 32($sp)    # store a3
+        lw      $s4, 36($sp)    # changed
+        lw      $s5, 40($sp)    # possibles
+        lw      $s6, 44($sp)    # number
+        sw      $s7, 48($sp) 
+        add     $sp, $sp, 52
+        jr      $ra 
+
+# // bool rule1(unsigned short* board) {
+# //   bool changed = false;
+# //   for (int y = 0 ; y < GRIDSIZE ; y++) {
+# //     for (int x = 0 ; x < GRIDSIZE ; x++) {
+# //       unsigned value = board[y*GRIDSIZE + x];
+# //       if (has_single_bit_set(value)) {
+# //         for (int k = 0 ; k < GRIDSIZE ; k++) {
+# //           // eliminate from row
+# //           if (k != x) {
+# //             if (board[y*GRIDSIZE + k] & value) {
+# //               board[y*GRIDSIZE + k] &= ~value;
+# //               changed = true;
+# //             }
+# //           }
+# //           // eliminate from column
+# //           if (k != y) {
+# //             if (board[k*GRIDSIZE + x] & value) {
+# //               board[k*GRIDSIZE + x] &= ~value;
+# //               changed = true;
+# //             }
+# //           }
+# //         }
+# //       }
+# //     }
+# //   }
+# //   return changed;
+# // }
+#a0: board
+rule1:
+        sub     $sp, $sp, 32    # allocate stack
+        sw      $ra, 0($sp)
+        sw      $a0, 4($sp)
+        sw      $s0, 8($sp)
+        sw      $s1, 12($sp)    # y
+        sw	$s2, 16($sp)    # x	 
+        sw	$s3, 20($sp)    # k
+        sw      $s4, 24($sp)	# changed
+        sw      $s5, 28($sp)    # value
+
+        move    $s0, $a0        # store address in s0
+        move    $s1, $0         # s1 = y = 0 
+        move    $s4, $0         # s4 = changed = false
+loop:
+        bge     $s1, GRIDSIZE, ret3
+        move    $s2, $0         # s2 = x = 0
+loop2:
+        bge     $s2, GRIDSIZE, inc1
+        mul     $t0, $s1, GRIDSIZE
+        add     $t0, $t0, $s2   # t0 = y*GRIDSIZE + x
+        mul     $t0, $t0, 2
+        add     $t0, $t0, $s0
+        lh      $s5, 0($t0)     # s5 = value
+        move    $a0, $s5        # a0 = value 
+        jal     has_single_bit_set
+        beq     $v0, $0, inc2
+
+        move    $s3, $0         # s3 = k = 0
+loop3:
+        bge     $s3, GRIDSIZE, inc2
+        beq     $s3, $s2, if_2
+
+        mul     $t0, $s1, GRIDSIZE
+        add     $t0, $t0, $s3   # t0 = y*GRIDSIZE + k
+        mul     $t0, $t0, 2
+        add     $t0, $t0, $s0
+        lh      $t1, 0($t0)     # t1 = board[y*GRIDSIZE + k]
+
+        and     $t2, $t1, $s5   # t2 = t1 & value
+        beq     $t2, $0, if_2
+
+        nor     $t2, $s5, $0    # t2 = ~value
+        and     $t3, $t1, $t2   # t1 = board[y*GRIDSIZE + k] &= ~value
+        sh      $t3, 0($t0)     # 
+        add     $t4, $0, 1
+        move    $s4, $t4        # changed = true
+if_2:
+        beq     $s3, $s1, inc3 
+        mul     $t0, $s3, GRIDSIZE
+        add     $t0, $t0, $s2   # k * GRIDSIZE + x
+        mul     $t0, $t0, 2
+        add     $t0, $t0, $s0
+
+        lh      $t1, 0($t0)
+
+        and     $t2, $t1, $s5   # t2 = t1 & value
+        beq     $t2, $0, inc3
+
+        nor     $t2, $s5, $0    # t3 = ~value
+        and     $t3, $t1, $t2   # t1 = board[y*GRIDSIZE + k] &= ~value
+        sh      $t3, 0($t0)     # 
+        add     $t4, $0, 1
+        move    $s4, $t4        # changed = true
+        j       inc3
+inc1:
+        add     $s1, $s1, 1     # s1 = ++y
+        j       loop
+inc2:
+        add     $s2, $s2, 1     # s2 = ++x
+        j       loop2
+inc3:
+        add     $s3, $s3, 1     # s3 = ++z
+        j       loop3
+
+ret3:
+        move    $v0, $s4        # return value = changed
+        lw      $ra, 0($sp)
+        lw      $a0, 4($sp)
+        lw      $s0, 8($sp)
+        lw      $s1, 12($sp)
+        lw	$s2, 16($sp)	 
+        lw	$s3, 20($sp)
+        lw      $s4, 24($sp)	 
+        lw      $s5, 28($sp)
+
+        add     $sp, $sp, 32
+        jr      $ra
+
+# rule2 #####################################################
+#
+# argument $a0: pointer to current board
+rule2:
+    sub $sp, $sp, 4                       #Store ra onto stack and initialize GRIDSIZE
+    sw $ra, 0($sp)
+    li $t0, GRIDSIZE                               # GRIDSIZE
+    li $t1, 1
+    sll $t1, $t1, $t0
+    subu $t1, $t1, 1                         #int ALL_VALUES = (1 << GRIDSIZE) - 1;
+    li $v0, 0                               #bool changed = false
+    li $t2, 0                               #i = 0
+rule2iloopstart:
+    bge $t2, $t0, rule2iloopend
+    li $t3, 0                               #j = 0
+    rule2jloopstart:
+        bge $t3, $t0, rule2jloopend
+        
+        mul $t4, $t2, $t0
+        add $t4, $t4, $t3
+        mul $t4, $t4, 2                     #sizeof(unsigned short)*(i*GRIDSIZE + j)
+        add $t4, $a0, $t4                   #address of board[i*GRIDSIZE+j]
+        lhu $t4, 0($t4)                     #board[i*GRIDSIZE + j]
+        
+        sub $sp, $sp, 24                    # Allocate stack 
+        sw $a0, 0($sp)
+        sw $t0, 4($sp)
+        sw $t1, 8($sp)
+        sw $t2, 12($sp)
+        sw $t3, 16($sp)
+        sw $v0, 20($sp)                     #Store all necessary variables on stack
+        move $a0, $t4
+        jal has_single_bit_set
+        lw $a0, 0($sp)
+        lw $t0, 4($sp)
+        lw $t1, 8($sp)
+        lw $t2, 12($sp)
+        lw $t3, 16($sp)
+        move $t4, $v0                       # Save $v0 into $t4
+        lw $v0, 20($sp)                     # Restore variables
+        add $sp, $sp, 24                    # Deallocate stack
+
+        bne $t4, $0, rule2continuestatement #if (has_single_bit_set(value)) continue;
+        
+        li $t5, 0                           #isum = 0
+        li $t6, 0                           #jsum = 0
+        li $t4, 0                           #k = 0, t2 = i, t3 = j, t4 = k
+        rule2kloopstart:
+            bge $t4, $t0, rule2kloopend
+            beq $t4, $t3, rule2kequalsj
+                mul $t7, $t2, $t0           #i*GRIDSIZE
+                add $t7, $t7, $t4           #i*GRIDSIZE+k
+                mul $t7, $t7, 2
+                add $t7, $a0, $t7           #&board[i*GRIDSIZE + k]
+                lhu $t7, 0($t7)
+                or $t6, $t6, $t7            #jsum |= board[i*GRIDSIZE + k];
+        rule2kequalsj:
+            beq $t4, $t2, rule2kequalsi     
+                mul $t7, $t4, $t0           #k*GRIDSIZE
+                add $t7, $t7, $t3           #k*GRIDSIZE+j
+                mul $t7, $t7, 2
+                add $t7, $a0, $t7           #&board[k*GRIDSIZE + j]
+                lhu $t7, 0($t7)
+                or $t5, $t5, $t7            #isum |= board[k*GRIDSIZE + j];
+        rule2kequalsi:
+            add $t4, $t4, 1
+            j rule2kloopstart
+        rule2kloopend:
+        beq $t1, $t6, rule2allvalequalsjsum
+            not $t6, $t6                    # ~jsum
+            and $t6, $t1, $t6               #ALL_VALUES & ~jsum
+            mul $t7, $t0, $t2               # i*GRIDSIZE
+            add $t7, $t7, $t3               #[i*GRIDSIZE+j]
+            mul $t7, $t7, 2                 #(i*GRIDSIZE+j)*sizeof(unsigned short)
+            add $t7, $a0, $t7
+            sh $t6, 0($t7)                  #board[i*GRIDSIZE + j] = ALL_VALUES & ~jsum;
+            li $v0, 1
+            j rule2continuestatement
+        rule2allvalequalsjsum:
+        beq $t1, $t5, rule2continuestatement
+            not $t5, $t5                    # ~isum
+            and $t5, $t1, $t5               #ALL_VALUES & ~isum;
+            mul $t7, $t0, $t2               # i*GRIDSIZE
+            add $t7, $t7, $t3               #[i*GRIDSIZE+j]
+            mul $t7, $t7, 2                 #(i*GRIDSIZE+j)*sizeof(unsigned short)
+            add $t7, $a0, $t7
+            sh $t5, 0($t7)                  #board[i*GRIDSIZE + j] = ALL_VALUES & ~isum;
+            li $v0, 1
+    rule2continuestatement:
+        add $t3, $t3, 1
+        j rule2jloopstart                   #continue; iterates to next index of jloop
+    rule2jloopend:
+    add $t2, $t2, 1
+    j rule2iloopstart
+rule2iloopend:
+
+    lw $ra, 0($sp)
+    add $sp, $sp, 4
+    jr $ra
+
+
+# board done ##################################################
+#
+# argument $a0: pointer to current board to check
+# argument $a1: pointer to puzzle struct
+board_done:
+    sub $sp, $sp, 36
+    sw  $ra, 0($sp)
+    sw  $s0, 4($sp)
+    sw  $s1, 8($sp)
+    sw  $s2, 12($sp)
+    sw  $s3, 16($sp)
+    sw  $s4, 20($sp)
+    sw  $s5, 24($sp)
+    sw  $s6, 28($sp)
+    sw  $s7, 32($sp)
+    
+    move    $s0, $a0        # s0 = current_board
+    move    $s1, $a1        # s1 = puzzle
+    li  $s2, GRIDSIZE              # s2 = GRIDSIZE
+    li  $t0, 1
+    sll $t0, $t0, $s2       # 1 << GRIDSIZE
+    sub $s3, $t0, 1     # s3 = ALL_VALUES = (1 << GRIDSIZE) - 1
+    
+    li  $s4, 0          # s4 = i = 0
+bd_i1_loop_start:
+    bge $s4, $s2, bd_i1_loop_end    # !(i < GRIDSIZE)
+bd_i1_loop_body:
+    li  $s5, 0          # s5 = acc = 0
+    li  $s6, 0          # s6 = j = 0
+bd_j1_loop_start:
+    bge $s6, $s2, bd_j1_loop_end    # !(j < GRIDSIZE)
+bd_j1_loop_body:
+    mul $t0, $s4, $s2       # i*GRIDSIZE
+    add $t0, $t0, $s6       # i*GRIDSIZE + j
+    mul $t0, $t0, 2         # sizeof(unsigned short)*(i*GRIDSIZE + j)
+    add $t0, $s0, $t0       # &current_board[i*GRIDSIZE + j]
+    lhu $s7, 0($t0)         # s7 = value = current_board[i*GRIDSIZE + j]
+    
+    move    $a0, $s7
+    jal has_single_bit_set
+    beq $v0, $0, bd_j1_loop_increment   # if (!hsbs(value)) continue
+    xor $s5, $s5, $s7
+    
+bd_j1_loop_increment:
+    add $s6, $s6, 1     # ++ j
+    j   bd_j1_loop_start
+bd_j1_loop_end:
+    bne $s5, $s3, bd_return_false   # if (acc != ALL_VALUES) return false
+    
+    li  $s5, 0          # s5 = acc = 0
+    li  $s6, 0          # s6 = j = 0
+bd_j2_loop_start:
+    bge $s6, $s2, bd_j2_loop_end    # !(j < GRIDSIZE)
+bd_j2_loop_body:
+    mul $t0, $s6, $s2       # j*GRIDSIZE
+    add $t0, $t0, $s4       # j*GRIDSIZE + i
+    mul $t0, $t0, 2
+    add $t0, $s0, $t0       # &current_board[j*GRIDSIZE + i]
+    lhu $s7, 0($t0)     # s7 = value = current_board[j*GRIDSIZE + i]
+    
+    move    $a0, $s7
+    jal has_single_bit_set
+    beq $v0, $0, bd_j2_loop_increment   # if (!hsbs(value)) continue
+    xor $s5, $s5, $s7
+    
+bd_j2_loop_increment:
+    add $s6, $s6, 1     # ++ j
+    j   bd_j2_loop_start
+bd_j2_loop_end:
+    bne $s5, $s3, bd_return_false   # if (acc != ALL_VALUES) return false
+    
+bd_i1_loop_increment:
+    add $s4, $s4, 1     # ++ i
+    j   bd_i1_loop_start
+bd_i1_loop_end:
+    li  $s4, 0          # s4 = i = 0
+bd_i2_loop_start:
+    bge $s4, $s2, bd_i2_loop_end    # !(i < GRIDSIZE)
+bd_i2_loop_body:
+    li  $t0, 2          # sizeof(short)
+    mul $t0, $t0, $s2
+    mul $t0, $t0, $s2       # sizeof(unsigned short board[GRIDSIZE*GRIDSIZE])
+    add $s3, $s1, $t0       # s3 = &(puzzle->constraints)
+    
+    add $t0, $s4, 1     # i+1
+    add $t1, $s2, 2     # GRIDSIZE+2
+    mul $t0, $t0, $t1       # (i+1)*(GRIDSIZE+2)
+    mul $t0, $t0, 2
+    add $t0, $t0, $s3       # &puzzle->constraints[(i+1)*(GRIDSIZE+2) + 0]
+    lhu $t9, 0($t0)     # t9 = left_constraint = puzzle->constraints[(i+1)*(GRIDSIZE+2) + 0]
+    li  $s5, 0          # s5 = count = 0
+    li  $s6, 0          # s6 = last = 0
+    
+    li  $s7, 0          # s7 = j = 0
+bd_j3_loop_start:
+    bge $s7, $s2, bd_j3_loop_end    # !(j < GRIDSIZE)
+bd_j3_loop_body:
+    mul $t0, $s4, $s2       # i*GRIDSIZE
+    add $t0, $t0, $s7       # i*GRIDSIZE + j
+    mul $t0, $t0, 2
+    add $t0, $s0, $t0       # &current_board[i*GRIDSIZE + j]
+    lhu $t0, 0($t0)     # t0 = current = current_board[i*GRIDSIZE + j]
+    ble $t0, $s6, bd_j3_loop_increment  # !(current > last)
+    add $s5, $s5, 1     # count += 1
+    move    $s6, $t0        # last = current
+bd_j3_loop_increment:
+    add $s7, $s7, 1     # ++ j
+    j   bd_j3_loop_start
+bd_j3_loop_end:
+    bne $s5, $t9, bd_return_false   # if (count != left_constraint) return false
+    
+    add $t0, $s4, 1     # i+1
+    add $t1, $s2, 2     # GRIDSIZE+2
+    mul $t0, $t0, $t1       # (i+1)*(GRIDSIZE+2)
+    add $t0, $t0, $s2       # (i+1)*(GRIDSIZE+2) + GRIDSIZE
+    add $t0, $t0, 1     # (i+1)*(GRIDSIZE+2) + GRIDSIZE + 1
+    mul $t0, $t0, 2
+    add $t0, $t0, $s3       # &puzzle->constraints[(i+1)*(GRIDSIZE+2) + GRIDSIZE + 1]
+    lhu $t9, 0($t0)     # t9 = right_constraint = puzzle->constraints[(i+1)*(GRIDSIZE+2) + GRIDSIZE + 1]
+    li  $s5, 0          # s5 = count = 0
+    li  $s6, 0          # s6 = last = 0
+    
+    sub $s7, $s2, 1     # s7 = j = GRIDSIZE - 1
+bd_j4_loop_start:
+    blt $s7, $0, bd_j4_loop_end # !(j >= 0)
+bd_j4_loop_body:
+    mul $t0, $s4, $s2       # i*GRIDSIZE
+    add $t0, $t0, $s7       # i*GRIDSIZE + j
+    mul $t0, $t0, 2
+    add $t0, $s0, $t0       # &current_board[i*GRIDSIZE + j]
+    lhu $t0, 0($t0)     # t0 = current = current_board[i*GRIDSIZE + j]
+    ble $t0, $s6, bd_j4_loop_increment  # !(current > last)
+    add $s5, $s5, 1     # count += 1
+    move    $s6, $t0        # last = current
+bd_j4_loop_increment:
+    sub $s7, $s7, 1     # -- j
+    j   bd_j4_loop_start
+bd_j4_loop_end:
+    bne $s5, $t9, bd_return_false   # if (count != right_constraint) return false
+    add $t0, $s4, 1     # i+1
+    mul $t0, $t0, 2
+    add $t0, $t0, $s3       # &puzzle->constraints[i + 1]
+    lhu $t9, 0($t0)     # t9 = top_constraint = puzzle->constraints[i + 1]
+    li  $s5, 0          # s5 = count = 0
+    li  $s6, 0          # s6 = last = 0
+    
+    li  $s7, 0          # s7 = j = 0
+bd_j5_loop_start:
+    bge $s7, $s2, bd_j5_loop_end    # !(j < GRIDSIZE)
+bd_j5_loop_body:
+    mul $t0, $s7, $s2       # j*GRIDSIZE
+    add $t0, $t0, $s4       # j*GRIDSIZE + i
+    mul $t0, $t0, 2
+    add $t0, $s0, $t0       # &current_board[j*GRIDSIZE + i]
+    lhu $t0, 0($t0)     # t0 = current = current_board[j*GRIDSIZE + i]
+    ble $t0, $s6, bd_j5_loop_increment  # !(current > last)
+    add $s5, $s5, 1     # count += 1
+    move    $s6, $t0        # last = current
+bd_j5_loop_increment:
+    add $s7, $s7, 1     # ++ j
+    j   bd_j5_loop_start
+bd_j5_loop_end:
+    bne $s5, $t9, bd_return_false   # if (count != top_constraint) return false
+    
+    add $t0, $s2, 1     # GRIDSIZE+1
+    add $t1, $s2, 2     # GRIDSIZE+2
+    mul $t0, $t0, $t1       # (GRIDSIZE+1)*(GRIDSIZE+2)
+    add $t0, $t0, $s4       # (GRIDSIZE+1)*(GRIDSIZE+2) + i
+    add $t0, $t0, 1     # (GRIDSIZE+1)*(GRIDSIZE+2) + i + 1
+    mul $t0, $t0, 2
+    add $t0, $t0, $s3       # &puzzle->constraints[(GRIDSIZE+1)*(GRIDSIZE+2) + i + 1]
+    lhu $t9, 0($t0)     # t9 = bottom_constraint = puzzle->constraints[(GRIDSIZE+1)*(GRIDSIZE+2) + i + 1]
+    li  $s5, 0          # s5 = count = 0
+    li  $s6, 0          # s6 = last = 0
+    
+    sub $s7, $s2, 1     # s7 = j = GRIDSIZE - 1
+bd_j6_loop_start:
+    blt $s7, $0, bd_j6_loop_end # !(j >= 0)
+bd_j6_loop_body:
+    mul $t0, $s7, $s2       # j*GRIDSIZE
+    add $t0, $t0, $s4       # j*GRIDSIZE + i
+    mul $t0, $t0, 2
+    add $t0, $s0, $t0       # &current_board[j*GRIDSIZE + i]
+    lhu $t0, 0($t0)     # t0 = current = current_board[j*GRIDSIZE + i]
+    ble $t0, $s6, bd_j6_loop_increment  # !(current > last)
+    add $s5, $s5, 1     # count += 1
+    move    $s6, $t0        # last = current
+bd_j6_loop_increment:
+    sub $s7, $s7, 1     # -- j
+    j   bd_j6_loop_start
+bd_j6_loop_end:
+    bne $s5, $t9, bd_return_false   # if (count != bottom_constraint) return false
+bd_i2_loop_increment:
+    add $s4, $s4, 1
+    j   bd_i2_loop_start
+bd_i2_loop_end:
+    li  $v0, 1          # return true
+    j   bd_return
+bd_return_false:
+    li  $v0, 0          # return false
+bd_return:
+    lw  $ra, 0($sp)
+    lw  $s0, 4($sp)
+    lw  $s1, 8($sp)
+    lw  $s2, 12($sp)
+    lw  $s3, 16($sp)
+    lw  $s4, 20($sp)
+    lw  $s5, 24($sp)
+    lw  $s6, 28($sp)
+    lw  $s7, 32($sp)
+    add $sp, $sp, 36
+    jr $ra
+
+# has single bit set ###########################################
+#
+# argument $a0: bit mask
+has_single_bit_set:
+    beq     $a0, $0, has_single_bit_set_iszero
+    sub     $v0, $a0, 1             # $v0: b-1
+    and     $v0, $a0, $v0           # $v0: b & (b-1)
+    not     $v0, $v0                # $v0: !(b & (b-1))
+    # if $v0 is zero, return zero
+    bne     $v0, -1, has_single_bit_set_iszero
+    li      $v0, 1
+    j       has_single_bit_set_done
+has_single_bit_set_iszero:
+    li      $v0, 0
+has_single_bit_set_done:
+    jr      $ra
+
+
+
+# increment heap ###############################################
+#
+# argument $a0: pointer to current board to check
+increment_heap:
+    sub $sp, $sp, 4
+    sw  $ra, 0($sp) # save $ra on stack
+
+    li  $t0, GRIDSIZE
+    mul $t0, $t0, $t0               # GRIDSIZE * GRIDSIZE
+    mul $a1, $t0, 2
+    add $a1, $a0, $a1               # new_board = old_board + GRIDSIZE*GRIDSIZE
+
+    jal copy_board
+
+    move $v0, $v0                   # // output the output of copy_board
+    lw  $ra, 0($sp)
+    add $sp, $sp, 4
+    jr $ra
+
+
+# copy board ###################################################
+#
+# argument $a0: pointer to old board
+# argument $a1: pointer to new board
+copy_board:
+    li  $t0, GRIDSIZE
+    mul $t0, $t0, $t0               # GRIDSIZE * GRIDSIZE
+    li  $t1, 0                      # i = 0
+ih_loop:
+    bge $t1, $t0, ih_done           # i < GRIDSIZE*GRIDSIZE
+
+    mul $t2, $t1, 2                 # i * sizeof(unsigned short)
+    add $t3, $a0, $t2               # &old_board[i]
+    lhu $t3, 0($t3)                 # old_board[i]
+
+    add $t4, $a1, $t2               # &new_board[i]
+    sh  $t3, 0($t4)                 # new_board[i] = old_board[i]
+
+    addi $t1, $t1, 1                # i++
+    j    ih_loop
+ih_done:
+    move $v0, $a1
+    jr $ra
+
+.kdata
+chunkIH:    .space 32
+non_intrpt_str:    .asciiz "Non-interrupt exception\n"
+unhandled_str:    .asciiz "Unhandled interrupt type\n"
+.ktext 0x80000180
+interrupt_handler:
+.set noat
+        move      $k1, $at        # Save $at
+.set at
+        la        $k0, chunkIH
+        sw        $a0, 0($k0)        # Get some free registers
+        sw        $v0, 4($k0)        # by storing them to a global variable
+        sw        $t0, 8($k0)
+        sw        $t1, 12($k0)
+        sw        $t2, 16($k0)
+        sw        $t3, 20($k0)
+        sw $t4, 24($k0)
+        sw $t5, 28($k0)
+
+        mfc0      $k0, $13             # Get Cause register
+        srl       $a0, $k0, 2
+        and       $a0, $a0, 0xf        # ExcCode field
+        bne       $a0, 0, non_intrpt
+
+
+
+interrupt_dispatch:            # Interrupt:
+    mfc0       $k0, $13        # Get Cause register, again
+    beq        $k0, 0, done        # handled all outstanding interrupts
+
+    and        $a0, $k0, BONK_INT_MASK    # is there a bonk interrupt?
+    bne        $a0, 0, bonk_interrupt
+
+    and        $a0, $k0, TIMER_INT_MASK    # is there a timer interrupt?
+    bne        $a0, 0, timer_interrupt
+
+    and     $a0, $k0, REQUEST_PUZZLE_INT_MASK
+    bne     $a0, 0, request_puzzle_interrupt
+
+    li        $v0, PRINT_STRING    # Unhandled interrupt types
+    la        $a0, unhandled_str
+    syscall
+    j    done
+
+bonk_interrupt:
+    sw      $0, BONK_ACK
+    #Fill in your code here
+        # sub     $sp, $sp, 4
+        # sw      $t0, 0($sp)
+
+        li      $t0, 37        # angle to go after bouncing
+        sw      $t0, ANGLE($0)
+        sw      $0, ANGLE_CONTROL($0)
+        li      $t0, 10
+        sw      $t0, VELOCITY($0)
+
+        # lw      $t0, 0($sp)
+        # add     $sp, $sp, 4
+
+        # li      $v0, 41         # Service 41, random int
+        # xor     $a0, $a0, $a0   # Select random generator 0
+        # syscall                 # Generate random int (returns in $a0)
+
+        # li      $v0, 1          # Service 1, print int
+        # syscall                 # Print previously generated random int
+        
+
+    j       interrupt_dispatch    # see if other interrupts are waiting
+
+request_puzzle_interrupt:
+    sw      $0, REQUEST_PUZZLE_ACK
+    #Fill in your code here
+        la      $t0, ready
+        li      $t1, 1
+        sw      $t1, 0($t0)
+    j   interrupt_dispatch
+
+timer_interrupt:
+    sw      $0, TIMER_ACK
+    #Fill in your code here
+	lw	$t1, TIMER($0)		# Request timer interrupt in 1000 cycles
+	add	$t1, $t1, 10000
+	sw	$t1, TIMER($0)
+
+	li	$t1, 1
+	sw	$t1, PICKUP_POWERUP($0)		# constantly try to pickup powerup
+        li      $t1, 1
+   #     sw      $t1, ENABLE_PAINT_BRUSH($0)	# enable paint brush
+
+	la 		$t0, inventory
+	sw 		$t0, GET_INVENTORY($0)
+
+check_inventory1:	
+	lb 		$t1, 8($t0)							#Inventory[0] poweruptype
+	beq		$t1 $0 check_inventory2				#No item
+
+use_inventory1:
+	sw  	$0 USE_POWERUP($0)
+
+check_inventory2:
+	lb 		$t1, 20($t0)							#Inventory[1] poweruptype
+	beq		$t1, $0 timer_interrupt_finish
+
+	li 		$t2, 1
+	sw 		$t2 USE_POWERUP($0)
+
+timer_interrupt_finish:
+    j        interrupt_dispatch    # see if other interrupts are waiting
+
+non_intrpt:                # was some non-interrupt
+    li        $v0, PRINT_STRING
+    la        $a0, non_intrpt_str
+    syscall                # print out an error message
+    # fall through to done
+
+done:
+    la      $k0, chunkIH
+    lw      $a0, 0($k0)        # Restore saved registers
+    lw      $v0, 4($k0)
+    lw      $t0, 8($k0)
+    lw      $t1, 12($k0)
+    lw      $t2, 16($k0)
+    lw      $t3, 20($k0)
+    lw $t4, 24($k0)
+    lw $t5, 28($k0)
+.set noat
+    move    $at, $k1        # Restore $at
+.set at
+    eret
+
+
